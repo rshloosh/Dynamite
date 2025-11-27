@@ -1,0 +1,37 @@
+# Build artifacts
+build/
+*/build/
+*/Builds/*/build/
+*.o
+*.a
+*.d
+*.dia
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+
+# JUCE generated
+*.vst3
+*.component
+*.aax
+*.app
+juce_vst3_helper
+
+# IDE
+.vs/
+.idea/
+*.suo
+*.user
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Backup files
+*.bak
+
