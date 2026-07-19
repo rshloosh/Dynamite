@@ -35,3 +35,6 @@ juce_vst3_helper
 # Backup files
 *.bak
 
+
+# clangd index cache
+.cache/

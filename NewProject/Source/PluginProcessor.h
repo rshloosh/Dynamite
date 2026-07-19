@@ -1,7 +1,10 @@
 /*
   ==============================================================================
 
-    This file contains the basic framework code for a JUCE plugin processor.
+    PluginProcessor.h
+
+    JUCE AudioProcessor wrapper around the real-time-safe DynamiteEngine.
+    Owns the APVTS parameter tree and delegates all DSP to the engine.
 
   ==============================================================================
 */
@@ -9,18 +12,15 @@
 #pragma once
 
 #include <JuceHeader.h>
-#include "DynamiteProcessor.h"
+#include "DynamiteEngine.h"
 
 //==============================================================================
-/**
-*/
-class NewProjectAudioProcessor : public juce::AudioProcessor,
-                                 public juce::AudioProcessorValueTreeState::Listener
+class NewProjectAudioProcessor : public juce::AudioProcessor
 {
 public:
     //==============================================================================
     NewProjectAudioProcessor();
-    ~NewProjectAudioProcessor() override;
+    ~NewProjectAudioProcessor() override = default;
 
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -30,9 +30,9 @@ public:
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
    #endif
 
-    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
-    void processBlockDouble (juce::AudioBuffer<double>&, juce::MidiBuffer&);
-    bool supportsDoublePrecisionProcessing();
+    void processBlock (juce::AudioBuffer<float>&,  juce::MidiBuffer&) override;
+    void processBlock (juce::AudioBuffer<double>&, juce::MidiBuffer&) override;
+    bool supportsDoublePrecisionProcessing() const override { return true; }
 
     //==============================================================================
     juce::AudioProcessorEditor* createEditor() override;
@@ -57,143 +57,43 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    // Get the current gain reduction value
-    float getCurrentGainReduction() const { return compressor.getCurrentGainReduction(); }
-    
-    // Set the mix level (dry/wet balance)
-    void setMixLevel(float newMixValue);
+    //==============================================================================
+    // Metering accessors for the editor (GUI thread reads engine atomics).
+    [[nodiscard]] float getCurrentGainReduction() const { return engine.getGainReductionDb(); }
+    [[nodiscard]] bool  getOverload()             const { return engine.getOverload(); }
 
-    // Access to parameters - making this public to allow UI access
+    // Public so DynamiteComponent can attach Slider/ComboBox/Button controls to
+    // the parameter IDs declared in createParameterLayout().
     juce::AudioProcessorValueTreeState parameters;
 
-    // Callback for parameter changes
-    void parameterChanged(const juce::String& parameterID, float newValue) override;
-
 private:
-    // Compressor instance
-    DynamiteProcessor compressor;
-    
-    // Double precision buffer
-    juce::AudioBuffer<double> doubleBuffer;
-    
-    // Parameter pointers for real-time access
-    std::atomic<float>* thresholdParam = nullptr;
-    std::atomic<float>* releaseParam = nullptr;
-    std::atomic<float>* detectionModeParam = nullptr;
-    std::atomic<float>* modeModeParam = nullptr;
-    std::atomic<float>* detectorTypeParam = nullptr;
-    std::atomic<float>* rangeParam = nullptr;
-    std::atomic<float>* outputParam = nullptr;
-    std::atomic<float>* gainReductionParam = nullptr;
-    std::atomic<float>* ratioParam = nullptr;
-    std::atomic<bool>* autoMakeupParam = nullptr;
-    
-    // Flag to prevent concurrent processing that could cause crashes
-    std::atomic<bool> isProcessing{false};
-    
-    // DeEsser state
-    struct DeEsserState
-    {
-        juce::dsp::IIR::Filter<float> filter;
-        double lastSampleRate = 0.0;
-        std::atomic<bool> needsUpdate{true};
-        float currentFreq = 6000.0f;
-        float currentQ = 0.707f;
-        float currentGain = -12.0f;
-    };
-    
-    DeEsserState deesserState;
-    juce::CriticalSection deesserLock;
-    
-    // Update the DeEsser filter coefficients if needed
-    void updateDeEsserIfNeeded();
-    
-    // Update all compressor settings from parameters
-    void updateCompressorSettings();
-    
-    // Calculate auto makeup gain based on parameters
-    float calculateAutoMakeupGain();
+    //==============================================================================
+    [[nodiscard]] static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
+    // Reads the cached APVTS atomics and pushes scalars to the engine. RT-safe:
+    // no allocation, no locking, no logging — just atomic loads and scalar stores.
+    void pushParametersToEngine() noexcept;
+
+    template <typename FloatT>
+    void processImpl (juce::AudioBuffer<FloatT>& buffer) noexcept;
+
+    //==============================================================================
+    DynamiteEngine engine;
+
+    // Cached raw parameter pointers for lock-free audio-thread access.
+    std::atomic<float>* pThreshold  = nullptr;
+    std::atomic<float>* pRelease    = nullptr;
+    std::atomic<float>* pRange      = nullptr;
+    std::atomic<float>* pOutput     = nullptr;
+    std::atomic<float>* pMix        = nullptr;
+    std::atomic<float>* pSource     = nullptr;
+    std::atomic<float>* pMode       = nullptr;
+    std::atomic<float>* pDetector   = nullptr;
+    std::atomic<float>* pAutoMakeup = nullptr;
+    std::atomic<float>* pScListen   = nullptr;
+    std::atomic<float>* pStereoLink = nullptr;
+    std::atomic<float>* pSafety     = nullptr;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NewProjectAudioProcessor)
-};
-
-//==============================================================================
-class DynamiteAudioProcessor : public juce::AudioProcessor,
-                               private juce::AudioProcessorValueTreeState::Listener
-{
-public:
-    //==============================================================================
-    DynamiteAudioProcessor();
-    ~DynamiteAudioProcessor() override;
-
-    //==============================================================================
-    void prepareToPlay (double sampleRate, int samplesPerBlock) override;
-    void releaseResources() override;
-
-   #ifndef JucePlugin_PreferredChannelConfigurations
-    bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
-   #endif
-
-    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
-    void processBlockDouble (juce::AudioBuffer<double>&, juce::MidiBuffer&);
-
-    //==============================================================================
-    juce::AudioProcessorEditor* createEditor() override;
-    bool hasEditor() const override;
-
-    //==============================================================================
-    const juce::String getName() const override;
-
-    bool acceptsMidi() const override;
-    bool producesMidi() const override;
-    bool isMidiEffect() const override;
-    double getTailLengthSeconds() const override;
-
-    //==============================================================================
-    int getNumPrograms() override;
-    int getCurrentProgram() override;
-    void setCurrentProgram (int index) override;
-    const juce::String getProgramName (int index) override;
-    void changeProgramName (int index, const juce::String& newName) override;
-
-    //==============================================================================
-    void getStateInformation (juce::MemoryBlock& destData) override;
-    void setStateInformation (const void* data, int sizeInBytes) override;
-
-    // Access to parameters
-    juce::AudioProcessorValueTreeState& getParameters() { return parameters; }
-    float getCurrentGainReduction() const { return compressor.getCurrentGainReduction(); }
-
-private:
-    // Parameter handling
-    void parameterChanged (const juce::String& parameterID, float newValue) override;
-    void updateCompressorSettings();
-    void updateDeEsserIfNeeded();
-    float calculateAutoMakeupGain();
-
-    // Parameter definitions
-    juce::AudioProcessorValueTreeState parameters;
-    std::atomic<float>* thresholdParam = nullptr;
-    std::atomic<float>* releaseParam = nullptr;
-    std::atomic<float>* detectionModeParam = nullptr;
-    std::atomic<float>* modeModeParam = nullptr;
-    std::atomic<float>* sidechainParam = nullptr;
-    std::atomic<float>* rangeParam = nullptr;
-    std::atomic<float>* outputParam = nullptr;
-    std::atomic<float>* gainReductionParam = nullptr;
-    std::atomic<float>* detectorTypeParam = nullptr;
-    std::atomic<float>* limitModeParam = nullptr;
-    std::atomic<float>* ratioParam = nullptr;
-    std::atomic<bool>* autoMakeupParam = nullptr;
-
-    // Compressor processing
-    DynamiteProcessor compressor;
-    juce::AudioBuffer<double> doubleBuffer;
-
-    // Double-precision processing
-    bool supportsDoublePrecisionProcessing();
-
-    //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DynamiteAudioProcessor)
 };

@@ -1,35 +1,29 @@
 #!/bin/bash
+# Build and run the Dyna-Mite DSP transfer-curve unit tests via the CMake
+# console-app target (Dynamite_Tests). Run from the repo root or NewProject/.
+set -e
 
-echo "Building threshold test program..."
+# Resolve repo root (this script lives in NewProject/).
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
 
-# Get JUCE modules path
-JUCE_MODULES_PATH="/Applications/JUCE/modules"
-JUCE_INCLUDES="-I$JUCE_MODULES_PATH -I$JUCE_MODULES_PATH/juce_audio_basics/buffers -I$JUCE_MODULES_PATH/juce_core/maths -I./JuceLibraryCode -I./Source"
+echo "Configuring (if needed)..."
+cmake -B build -DCMAKE_BUILD_TYPE=Release >/dev/null
 
-# Compile the test program
-clang++ -std=c++17 test_threshold.cpp Source/DynamiteProcessor.cpp \
-  -o threshold_test $JUCE_INCLUDES \
-  -I/Applications/JUCE/modules \
-  -I./JuceLibraryCode \
-  -framework Cocoa \
-  -framework CoreAudio \
-  -framework CoreMIDI \
-  -framework AudioToolbox \
-  -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 \
-  -DJUCE_STANDALONE_APPLICATION=1
+echo "Building Dynamite_Tests..."
+cmake --build build --config Release --target Dynamite_Tests -j"$(sysctl -n hw.ncpu)"
 
-# Check if compilation was successful
-if [ $? -eq 0 ]; then
-  echo "Build successful, running test..."
-  ./threshold_test
-  
-  # Display test results
-  if [ -f "threshold_test_results.txt" ]; then
-    echo "Test results:"
-    cat threshold_test_results.txt
-  else
-    echo "Error: Test results file not found."
-  fi
-else
-  echo "Build failed."
-fi 
+# Locate the built test executable (layout varies by generator).
+BIN="$(find build -type f -name 'Dynamite_Tests' -perm -u+x 2>/dev/null | head -n1)"
+if [ -z "$BIN" ]; then
+  BIN="$(find build -path '*Dynamite_Tests*' -type f -perm -u+x 2>/dev/null | grep -v '\.o$' | head -n1)"
+fi
+
+if [ -z "$BIN" ]; then
+  echo "Error: could not locate the Dynamite_Tests executable under build/."
+  exit 1
+fi
+
+echo "Running: $BIN"
+echo
+"$BIN"

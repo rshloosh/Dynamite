@@ -1,96 +1,130 @@
+/*
+  ==============================================================================
+
+    DynamiteComponent.h
+
+    Faithful vintage faceplate for the Valley People "Dyna-Mite" dynamics
+    processor. Brushed-metal panel, cream/black skirted knobs, an 8-LED gain
+    reduction ladder with a separate OVERLOAD lamp, three 3-position rotary
+    selectors, and a tastefully secondary "modern extras" row.
+
+    All controls bind to the plugin's APVTS via Slider/ComboBox/Button
+    attachments. The gain-reduction meter is driven by a ~35 Hz Timer that
+    reads audioProcessor.getCurrentGainReduction() and getOverload().
+
+  ==============================================================================
+*/
+
 #pragma once
 
 #include <JuceHeader.h>
+#include <array>
 #include "PluginProcessor.h"
 
-class DynamiteComponent : public juce::Component,
-                          public juce::Timer,
-                          public juce::Slider::Listener,
-                          private juce::Label::Listener
+//==============================================================================
+/** Custom LookAndFeel: vintage cream/black skirted rotary knobs and small
+    illuminated modern toggle buttons. */
+class DynamiteLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
-    DynamiteComponent(NewProjectAudioProcessor&);
-    ~DynamiteComponent() override;
+    DynamiteLookAndFeel();
 
-    void paint(juce::Graphics&) override;
-    void resized() override;
+    void drawRotarySlider (juce::Graphics&, int x, int y, int width, int height,
+                           float sliderPos, float rotaryStartAngle, float rotaryEndAngle,
+                           juce::Slider&) override;
 
-    // Timer callback for meter updates
-    void timerCallback() override;
-
-    void sliderValueChanged(juce::Slider* slider) override;
-    void labelTextChanged(juce::Label* labelThatHasChanged) override {}
-
-    // Mouse event handlers for tooltip functionality
-    void mouseMove(const juce::MouseEvent& event) override;
-    void mouseExit(const juce::MouseEvent& event) override;
+    void drawToggleButton (juce::Graphics&, juce::ToggleButton&,
+                           bool shouldDrawButtonAsHighlighted,
+                           bool shouldDrawButtonAsDown) override;
 
 private:
-    // Reference to processor
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DynamiteLookAndFeel)
+};
+
+//==============================================================================
+/** A vintage 3-position rotary selector. It draws a metal knob whose pointer
+    indexes one of three silkscreened legends. A hidden juce::ComboBox carries
+    the actual selection so a ComboBoxAttachment can bind it to a Choice
+    parameter; clicking (or the mouse wheel) steps the selection. */
+class ThreePositionSwitch : public juce::Component
+{
+public:
+    ThreePositionSwitch (juce::String title, juce::StringArray legends);
+
+    [[nodiscard]] juce::ComboBox& getComboBox() noexcept { return box; }
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+
+private:
+    void step (int direction);
+
+    juce::String  titleText;
+    juce::ComboBox box;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ThreePositionSwitch)
+};
+
+//==============================================================================
+class DynamiteComponent : public juce::Component,
+                          private juce::Timer
+{
+public:
+    explicit DynamiteComponent (NewProjectAudioProcessor&);
+    ~DynamiteComponent() override;
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+private:
+    void timerCallback() override;
+
+    void buildPanelImage();
+    void drawScrews        (juce::Graphics&) const;
+    void drawHeader        (juce::Graphics&) const;
+    void drawMeter         (juce::Graphics&) const;
+    void drawKnobFurniture (juce::Graphics&) const;
+    void drawExtras        (juce::Graphics&) const;
+
     NewProjectAudioProcessor& audioProcessor;
-    
-    // Knob styling function
-    struct KnobStyle : public juce::LookAndFeel_V4
-    {
-        void drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height, 
-                              float sliderPos, float rotaryStartAngle, float rotaryEndAngle, 
-                              juce::Slider& slider) override;
-    };
-    
-    KnobStyle knobStyle;
-    
-    // UI components
-    juce::Slider thresholdKnob;
-    juce::Slider releaseKnob;
-    juce::Slider rangeKnob;
-    juce::Slider outputKnob;
-    juce::Slider mixKnob;
-    juce::ComboBox detectionToggle;    // INT/DS/EXT
-    juce::ComboBox modeToggle;         // GR/OUT/LIMIT
-    juce::ComboBox detectorToggle;     // GATE/PEAK/AVG
-    juce::Slider gainReductionSlider;
-    
-    // Label for mix knob
-    std::unique_ptr<juce::Label> mixLabel;
-    
-    // Tooltips and hover state
-    juce::Rectangle<int> hoverArea;
-    juce::String hoverText;
-    bool isHovering = false;
-    juce::Component* hoveredComponent = nullptr;
-    
-    // Setup methods
-    void setupControls();
-    void setupMeters();
-    
-    // Drawing methods
-    void drawBackground(juce::Graphics& g);
-    void drawKnob(juce::Graphics& g, const juce::Rectangle<float>& bounds, 
-                 const juce::String& label, float value, float minVal, float maxVal);
-    void drawLED(juce::Graphics& g, const juce::Rectangle<float>& bounds, 
-                bool isOn, const juce::Colour& onColor);
-    void drawToggleSwitch(juce::Graphics& g, const juce::Rectangle<float>& bounds, 
-                         const juce::StringArray& options, int position);
-    void drawGainReductionMeter(juce::Graphics& g, const juce::Rectangle<int>& bounds, float gainReduction);
-    void drawHoverTooltip(juce::Graphics& g);
-    
-    // Parameter attachments
-    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
-    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
-    
-    std::unique_ptr<SliderAttachment> thresholdAttachment;
-    std::unique_ptr<SliderAttachment> releaseAttachment;
-    std::unique_ptr<SliderAttachment> rangeAttachment;
-    std::unique_ptr<SliderAttachment> outputAttachment;
-    std::unique_ptr<SliderAttachment> mixKnobAttachment;
-    std::unique_ptr<ComboBoxAttachment> detectionToggleAttachment;
-    std::unique_ptr<ComboBoxAttachment> modeToggleAttachment;
-    std::unique_ptr<ComboBoxAttachment> detectorToggleAttachment;
-    std::unique_ptr<SliderAttachment> gainReductionAttachment;
-    
-    // Get the display name for a component
-    juce::String getComponentName(juce::Component* component);
-    
-    // Prevent copying
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DynamiteComponent)
-}; 
+
+    // LookAndFeel first -> destroyed last (after the controls that reference it).
+    DynamiteLookAndFeel lnf;
+    juce::TooltipWindow tooltips { this, 550 };
+
+    // ---- Controls ----
+    juce::Slider thresholdKnob, releaseKnob, rangeKnob, outputKnob, mixKnob;
+
+    ThreePositionSwitch sourceSwitch   { "SOURCE",   { "INT", "DS-FM", "EXT" } };
+    ThreePositionSwitch modeSwitch     { "MODE",     { "LIMIT", "EXPAND", "OUT" } };
+    ThreePositionSwitch detectorSwitch { "DETECTOR", { "AVG", "PEAK", "GATE" } };
+
+    juce::ToggleButton autoMakeupButton, scListenButton, stereoLinkButton, safetyButton;
+
+    // ---- Attachments (declared last -> destroyed first) ----
+    using SA = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using CA = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+    using BA = juce::AudioProcessorValueTreeState::ButtonAttachment;
+
+    std::unique_ptr<SA> thresholdAtt, releaseAtt, rangeAtt, outputAtt, mixAtt;
+    std::unique_ptr<CA> sourceAtt, modeAtt, detectorAtt;
+    std::unique_ptr<BA> autoMakeupAtt, scListenAtt, stereoLinkAtt, safetyAtt;
+
+    // ---- Layout ----
+    juce::Rectangle<int> headerArea, wordmarkArea, meterArea, extrasArea, mixCell;
+    std::array<juce::Rectangle<int>, 4> knobCells;
+
+    // Cached brushed-metal background (rebuilt on resize; editor is fixed size).
+    juce::Image panelImage;
+
+    // ---- Meter ballistics (GUI thread only) ----
+    float grDisplay   = 0.0f;   // smoothed gain reduction (dB, >= 0)
+    float grPeak      = 0.0f;   // peak-hold value (dB, >= 0)
+    int   peakHold    = 0;      // remaining hold ticks
+    bool  overloadOn  = false;
+    int   overloadHold = 0;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DynamiteComponent)
+};
